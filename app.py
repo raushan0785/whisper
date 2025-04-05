@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-# CORS config
+# Allow frontend to connect from any origin (safe for demo; restrict in production)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,9 +25,8 @@ except Exception as e:
     model = None
     print("Model loading failed:", e)
 
-# Serve frontend
 @app.get("/", response_class=HTMLResponse)
-def home():
+def root():
     return """
     <!DOCTYPE html>
     <html lang="en">
@@ -41,7 +40,7 @@ def home():
         <input type="file" id="fileInput" accept="audio/*">
         <button onclick="uploadAudio()">Upload</button>
         <h3>Status:</h3>
-        <div id="status">Waiting for upload...</div>
+        <div id="status">Waiting...</div>
         <h3>Transcription:</h3>
         <pre id="transcription"></pre>
 
@@ -52,38 +51,41 @@ def home():
                 const transcription = document.getElementById("transcription");
 
                 if (!input.files.length) {
-                    alert("Please select a file!");
+                    alert("Please select a file first!");
                     return;
                 }
 
                 const file = input.files[0];
                 if (file.size > 5 * 1024 * 1024) {
-                    alert("File too large. Please upload a file under 5MB.");
+                    alert("Please upload a file under 5MB.");
                     return;
                 }
 
                 const formData = new FormData();
                 formData.append("file", file);
 
-                status.innerText = "Uploading and transcribing, please wait...";
+                status.innerText = "Uploading and transcribing...";
+                transcription.innerText = "";
 
                 try {
-                    const res = await fetch("/transcribe/", {
+                    const response = await fetch(`${window.location.origin}/transcribe`, {
                         method: "POST",
                         body: formData
                     });
 
-                    const data = await res.json();
-                    if (data.transcription) {
-                        status.innerText = "Done!";
-                        transcription.innerText = data.transcription;
-                    } else {
-                        status.innerText = "Error occurred.";
-                        transcription.innerText = data.error || "Unknown error.";
+                    if (!response.ok) {
+                        const error = await response.json();
+                        status.innerText = "Error: " + (error.detail || response.statusText);
+                        return;
                     }
-                } catch (err) {
+
+                    const result = await response.json();
+                    status.innerText = "Done!";
+                    transcription.innerText = result.transcription || "No text found.";
+
+                } catch (error) {
                     status.innerText = "Network error!";
-                    transcription.innerText = err.toString();
+                    transcription.innerText = error.message;
                 }
             }
         </script>
@@ -91,16 +93,15 @@ def home():
     </html>
     """
 
-@app.post("/transcribe/")
+@app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
-        raise HTTPException(status_code=500, detail="Whisper model not loaded.")
+        raise HTTPException(status_code=500, detail="Model not loaded.")
 
-    # Limit max file size (5MB)
-    size_limit = 5 * 1024 * 1024
+    # Size limit: 5MB
     contents = await file.read()
-    if len(contents) > size_limit:
-        raise HTTPException(status_code=413, detail="File too large. Max 5MB allowed.")
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Please upload a file under 5MB.")
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
@@ -108,7 +109,6 @@ async def transcribe(file: UploadFile = File(...)):
             temp_path = temp.name
 
         result = model.transcribe(temp_path)
-
         os.remove(temp_path)
 
         return {
@@ -117,5 +117,4 @@ async def transcribe(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        return {"error": f"Transcription failed: {str(e)}"}
-
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
