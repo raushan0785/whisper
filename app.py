@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 import whisper
 import tempfile
 import os
@@ -25,7 +26,7 @@ except Exception as e:
     model = None
     print("Model loading failed:", e)
 
-# Serve HTML UI
+# Serve simple frontend UI
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 def home():
@@ -66,7 +67,15 @@ def home():
                         body: formData
                     });
 
-                    const data = await res.json();
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (e) {
+                        status.innerText = "Server error! Invalid response.";
+                        output.innerText = "Could not parse server response.";
+                        return;
+                    }
+
                     if (data.transcription) {
                         status.innerText = "Done!";
                         output.innerText = data.transcription;
@@ -88,7 +97,10 @@ def home():
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
-        return {"error": "Model not loaded. Please reload the server."}
+        return JSONResponse(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "Model not loaded. Please reload the server."}
+        )
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
@@ -108,4 +120,7 @@ async def transcribe(file: UploadFile = File(...)):
 
     except Exception as e:
         print("Transcription error:", e)
-        return {"error": f"Transcription failed: {str(e)}"}
+        return JSONResponse(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": f"Transcription failed: {str(e)}"}
+        )
