@@ -61,7 +61,7 @@ def home():
                 formData.append("file", input.files[0]);
 
                 try {
-                    const res = await fetch(window.location.origin + "/transcribe", {
+                    const res = await fetch("https://whisper-9myq.onrender.com/transcribe", {
                         method: "POST",
                         body: formData
                     });
@@ -84,7 +84,7 @@ def home():
     </html>
     """
 
-# Transcription route (no trailing slash)
+# Transcription route
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
