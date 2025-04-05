@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 # Load Whisper model
-model = whisper.load_model("base")
+model = whisper.load_model("tiny")
 
 @app.post("/transcribe/")
 async def transcribe_audio(file: UploadFile = File(...)):
