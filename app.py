@@ -7,10 +7,10 @@ import os
 
 app = FastAPI()
 
-# Allow frontend to connect from any origin (safe for demo; restrict in production)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all for demo
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -19,7 +19,7 @@ app.add_middleware(
 # Load Whisper model
 try:
     print("Loading Whisper model...")
-    model = whisper.load_model("tiny")
+    model = whisper.load_model("tiny")  # Use 'tiny' or 'base'
     print("Model loaded successfully!")
 except Exception as e:
     model = None
@@ -29,63 +29,42 @@ except Exception as e:
 def root():
     return """
     <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Audio Transcription</title>
-    </head>
+    <html>
+    <head><title>Transcriber</title></head>
     <body>
-        <h2>Upload an Audio File</h2>
-        <input type="file" id="fileInput" accept="audio/*">
+        <h2>Upload Audio</h2>
+        <input type="file" id="fileInput" accept="audio/*" />
         <button onclick="uploadAudio()">Upload</button>
-        <h3>Status:</h3>
-        <div id="status">Waiting...</div>
-        <h3>Transcription:</h3>
-        <pre id="transcription"></pre>
+        <p id="status"></p>
+        <pre id="result"></pre>
 
         <script>
             async function uploadAudio() {
                 const input = document.getElementById("fileInput");
                 const status = document.getElementById("status");
-                const transcription = document.getElementById("transcription");
+                const result = document.getElementById("result");
 
                 if (!input.files.length) {
-                    alert("Please select a file first!");
+                    alert("Choose an audio file!");
                     return;
                 }
 
-                const file = input.files[0];
-                if (file.size > 5 * 1024 * 1024) {
-                    alert("Please upload a file under 5MB.");
-                    return;
-                }
-
+                status.innerText = "Uploading...";
                 const formData = new FormData();
-                formData.append("file", file);
-
-                status.innerText = "Uploading and transcribing...";
-                transcription.innerText = "";
+                formData.append("file", input.files[0]);
 
                 try {
-                    const response = await fetch(`${window.location.origin}/transcribe`, {
+                    const res = await fetch("/transcribe", {
                         method: "POST",
-                        body: formData
+                        body: formData,
                     });
 
-                    if (!response.ok) {
-                        const error = await response.json();
-                        status.innerText = "Error: " + (error.detail || response.statusText);
-                        return;
-                    }
-
-                    const result = await response.json();
-                    status.innerText = "Done!";
-                    transcription.innerText = result.transcription || "No text found.";
-
-                } catch (error) {
-                    status.innerText = "Network error!";
-                    transcription.innerText = error.message;
+                    const data = await res.json();
+                    result.innerText = data.transcription || data.error || "No transcription.";
+                    status.innerText = "Done";
+                } catch (err) {
+                    status.innerText = "Network error";
+                    result.innerText = err;
                 }
             }
         </script>
@@ -96,25 +75,23 @@ def root():
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded.")
+        raise HTTPException(status_code=500, detail="Model not loaded")
 
-    # Size limit: 5MB
     contents = await file.read()
     if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Please upload a file under 5MB.")
+        raise HTTPException(status_code=413, detail="File too large. Use under 5MB.")
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
-            temp.write(contents)
-            temp_path = temp.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+            temp_audio.write(contents)
+            temp_path = temp_audio.name
 
-        result = model.transcribe(temp_path)
+        print("Transcribing:", temp_path)
+        result = model.transcribe(temp_path, fp16=False)
+
         os.remove(temp_path)
 
-        return {
-            "filename": file.filename,
-            "transcription": result.get("text", "")
-        }
-
+        return {"filename": file.filename, "transcription": result.get("text", "")}
     except Exception as e:
+        print("Error:", e)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
