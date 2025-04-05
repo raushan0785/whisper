@@ -24,7 +24,7 @@
             formData.append("file", fileInput.files[0]);
 
             try {
-                const response = await fetch("http://127.0.0.1:8000/transcribe/", {
+                const response = await fetch("https://whisper-9myq.onrender.com/transcribe/", {
                     method: "POST",
                     body: formData
                 });
