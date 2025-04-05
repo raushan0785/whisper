@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-# CORS for frontend access
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,14 +16,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load lightweight whisper model (use smallest to avoid memory error)
+# Load Whisper model (tiny to save memory)
 try:
     model = whisper.load_model("tiny")
 except Exception as e:
     model = None
     print("Model load failed:", e)
 
+# Serve HTML on root path with GET and HEAD support
 @app.get("/", response_class=HTMLResponse)
+@app.head("/", response_class=HTMLResponse)
 def home():
     return """
     <!DOCTYPE html>
@@ -58,7 +60,8 @@ def home():
                     });
 
                     const data = await res.json();
-                    document.getElementById("transcription").innerText = data.transcription || "No text found.";
+                    document.getElementById("transcription").innerText =
+                        data.transcription || data.error || "No transcription found.";
                 } catch (err) {
                     document.getElementById("transcription").innerText = "Error during transcription.";
                 }
@@ -68,18 +71,22 @@ def home():
     </html>
     """
 
+# Audio transcription endpoint
 @app.post("/transcribe/")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
         return {"error": "Model not loaded. Please try again later."}
 
     try:
+        # Save uploaded file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
             temp.write(await file.read())
             temp_path = temp.name
 
+        # Transcribe
         result = model.transcribe(temp_path)
 
+        # Clean up
         os.remove(temp_path)
 
         return {
