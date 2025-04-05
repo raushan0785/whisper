@@ -18,16 +18,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Whisper model
+# Load Whisper model on startup
 try:
     print("Loading Whisper model...")
-    model = whisper.load_model("tiny.en")
+    model = whisper.load_model("tiny.en")  # You can try "base" if tiny is too small
     print("Model loaded successfully!")
 except Exception as e:
     model = None
     print("Model loading failed:", e)
 
-# Serve frontend HTML
+# Frontend
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
@@ -62,7 +62,7 @@ def home():
                 formData.append("file", input.files[0]);
 
                 try {
-                    const res = await fetch("https://whisper-9myq.onrender.com/transcribe", {
+                    const res = await fetch("/transcribe", {
                         method: "POST",
                         body: formData
                     });
@@ -109,8 +109,6 @@ async def transcribe(file: UploadFile = File(...)):
             temp_path = temp.name
 
         print(f"Saved uploaded file to: {temp_path}")
-
-        # Transcribe using Whisper
         result = model.transcribe(temp_path)
         print("Transcription completed.")
 
