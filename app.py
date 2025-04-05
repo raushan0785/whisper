@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 import whisper
@@ -10,7 +10,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for demo
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -19,52 +19,64 @@ app.add_middleware(
 # Load Whisper model
 try:
     print("Loading Whisper model...")
-    model = whisper.load_model("tiny")  # Use 'tiny' or 'base'
+    model = whisper.load_model("tiny.en")
     print("Model loaded successfully!")
 except Exception as e:
     model = None
     print("Model loading failed:", e)
 
+# Serve HTML UI
 @app.get("/", response_class=HTMLResponse)
-def root():
+@app.head("/", response_class=HTMLResponse)
+def home():
     return """
     <!DOCTYPE html>
     <html>
-    <head><title>Transcriber</title></head>
+    <head>
+        <title>Audio Transcription</title>
+    </head>
     <body>
-        <h2>Upload Audio</h2>
-        <input type="file" id="fileInput" accept="audio/*" />
+        <h2>Upload an Audio File</h2>
+        <input type="file" id="fileInput" accept="audio/*">
         <button onclick="uploadAudio()">Upload</button>
-        <p id="status"></p>
-        <pre id="result"></pre>
+        <p id="status" style="color:blue;"></p>
+        <h3>Transcription:</h3>
+        <pre id="transcription"></pre>
 
         <script>
             async function uploadAudio() {
                 const input = document.getElementById("fileInput");
                 const status = document.getElementById("status");
-                const result = document.getElementById("result");
+                const output = document.getElementById("transcription");
 
                 if (!input.files.length) {
-                    alert("Choose an audio file!");
+                    alert("Please select a file!");
                     return;
                 }
 
-                status.innerText = "Uploading...";
+                status.innerText = "Transcribing, please wait...";
+                output.innerText = "";
+
                 const formData = new FormData();
                 formData.append("file", input.files[0]);
 
                 try {
-                    const res = await fetch("/transcribe", {
+                    const res = await fetch(window.location.origin + "/transcribe", {
                         method: "POST",
-                        body: formData,
+                        body: formData
                     });
 
                     const data = await res.json();
-                    result.innerText = data.transcription || data.error || "No transcription.";
-                    status.innerText = "Done";
+                    if (data.transcription) {
+                        status.innerText = "Done!";
+                        output.innerText = data.transcription;
+                    } else {
+                        status.innerText = "Failed to transcribe.";
+                        output.innerText = data.error || "No transcription found.";
+                    }
                 } catch (err) {
-                    status.innerText = "Network error";
-                    result.innerText = err;
+                    status.innerText = "Network error!";
+                    output.innerText = err;
                 }
             }
         </script>
@@ -72,26 +84,28 @@ def root():
     </html>
     """
 
+# Transcription route (no trailing slash)
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-
-    contents = await file.read()
-    if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Use under 5MB.")
+        return {"error": "Model not loaded. Please reload the server."}
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-            temp_audio.write(contents)
-            temp_path = temp_audio.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
+            temp.write(await file.read())
+            temp_path = temp.name
 
-        print("Transcribing:", temp_path)
-        result = model.transcribe(temp_path, fp16=False)
+        print(f"Saved uploaded file to: {temp_path}")
+        result = model.transcribe(temp_path)
+        print("Transcription result:", result)
 
         os.remove(temp_path)
 
-        return {"filename": file.filename, "transcription": result.get("text", "")}
+        return {
+            "filename": file.filename,
+            "transcription": result.get("text", "")
+        }
+
     except Exception as e:
-        print("Error:", e)
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        print("Transcription error:", e)
+        return {"error": f"Transcription failed: {str(e)}"}
