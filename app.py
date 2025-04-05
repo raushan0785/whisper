@@ -5,6 +5,7 @@ from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 import whisper
 import tempfile
 import os
+import traceback
 
 app = FastAPI()
 
@@ -26,9 +27,8 @@ except Exception as e:
     model = None
     print("Model loading failed:", e)
 
-# Serve simple frontend UI
+# Serve frontend HTML
 @app.get("/", response_class=HTMLResponse)
-@app.head("/", response_class=HTMLResponse)
 def home():
     return """
     <!DOCTYPE html>
@@ -71,8 +71,8 @@ def home():
                     try {
                         data = await res.json();
                     } catch (e) {
-                        status.innerText = "Server error! Invalid response.";
-                        output.innerText = "Could not parse server response.";
+                        status.innerText = "Server error! Could not parse response.";
+                        output.innerText = "Invalid JSON response.";
                         return;
                     }
 
@@ -81,7 +81,7 @@ def home():
                         output.innerText = data.transcription;
                     } else {
                         status.innerText = "Failed to transcribe.";
-                        output.innerText = data.error || "No transcription found.";
+                        output.innerText = data.error || "No transcription returned.";
                     }
                 } catch (err) {
                     status.innerText = "Network error!";
@@ -99,19 +99,20 @@ async def transcribe(file: UploadFile = File(...)):
     if model is None:
         return JSONResponse(
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "Model not loaded. Please reload the server."}
+            content={"error": "Model not loaded."}
         )
 
+    temp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
             temp.write(await file.read())
             temp_path = temp.name
 
         print(f"Saved uploaded file to: {temp_path}")
-        result = model.transcribe(temp_path)
-        print("Transcription result:", result)
 
-        os.remove(temp_path)
+        # Transcribe using Whisper
+        result = model.transcribe(temp_path)
+        print("Transcription completed.")
 
         return {
             "filename": file.filename,
@@ -119,8 +120,12 @@ async def transcribe(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        print("Transcription error:", e)
+        print("Transcription error:", traceback.format_exc())
         return JSONResponse(
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": f"Transcription failed: {str(e)}"}
         )
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
