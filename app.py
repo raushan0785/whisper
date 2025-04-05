@@ -16,14 +16,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Whisper model (tiny to save memory)
+# Load model
 try:
+    print("Loading Whisper model...")
     model = whisper.load_model("tiny")
+    print("Model loaded successfully!")
 except Exception as e:
     model = None
-    print("Model load failed:", e)
+    print("Model loading failed:", e)
 
-# Serve HTML on root path with GET and HEAD support
+# Serve HTML on root
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 def home():
@@ -61,9 +63,9 @@ def home():
 
                     const data = await res.json();
                     document.getElementById("transcription").innerText =
-                        data.transcription || data.error || "No transcription found.";
+                        data.transcription || data.error || "No transcription returned.";
                 } catch (err) {
-                    document.getElementById("transcription").innerText = "Error during transcription.";
+                    document.getElementById("transcription").innerText = "Error during transcription: " + err;
                 }
             }
         </script>
@@ -71,22 +73,24 @@ def home():
     </html>
     """
 
-# Audio transcription endpoint
 @app.post("/transcribe/")
 async def transcribe(file: UploadFile = File(...)):
     if model is None:
-        return {"error": "Model not loaded. Please try again later."}
+        return {"error": "Model not loaded. Please reload the server or check logs."}
 
     try:
-        # Save uploaded file
+        # Save file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
-            temp.write(await file.read())
+            content = await file.read()
+            temp.write(content)
             temp_path = temp.name
 
-        # Transcribe
-        result = model.transcribe(temp_path)
+        print(f"Saved uploaded file to: {temp_path}")
 
-        # Clean up
+        # Run transcription
+        result = model.transcribe(temp_path)
+        print("Transcription result:", result)
+
         os.remove(temp_path)
 
         return {
@@ -95,4 +99,5 @@ async def transcribe(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        return {"error": f"Failed to transcribe: {str(e)}"}
+        print("Transcription error:", e)
+        return {"error": f"Transcription failed: {str(e)}"}
