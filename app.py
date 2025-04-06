@@ -58,7 +58,7 @@ async def index():
                 document.getElementById("transcription").innerText = "Transcribing...";
 
                 try {
-                    const response = await fetch("/transcribe/", {
+                    const response = await fetch("https://whisper-9myq.onrender.com/transcribe/", {
                         method: "POST",
                         body: formData
                     });
