@@ -17,7 +17,7 @@ app.add_middleware(
 )
 
 # Load Whisper model
-model = whisper.load_model("base")  # you can change to "tiny" if Render has memory issues
+model = whisper.load_model("tiny.en")  # you can change to "tiny" if Render has memory issues
 
 # Serve HTML UI
 @app.get("/", response_class=HTMLResponse)
