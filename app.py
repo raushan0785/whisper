@@ -1,91 +1,79 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import whisper
 import tempfile
 import os
-import traceback
 
 app = FastAPI()
 
-# Enable CORS
+# Allow CORS (for local dev or frontend from other origin)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Change this in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load Whisper model on startup
-try:
-    print("Loading Whisper model...")
-    model = whisper.load_model("tiny.en")  # You can try "base" if tiny is too small
-    print("Model loaded successfully!")
-except Exception as e:
-    model = None
-    print("Model loading failed:", e)
+# Lazy load model
+model = None
 
-# Frontend
+def get_model():
+    global model
+    if model is None:
+        model = whisper.load_model("tiny")  # Use "base" if you want better accuracy
+    return model
+
+# Root HTML Page
 @app.get("/", response_class=HTMLResponse)
-def home():
+async def index():
     return """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Audio Transcription</title>
     </head>
     <body>
         <h2>Upload an Audio File</h2>
         <input type="file" id="fileInput" accept="audio/*">
         <button onclick="uploadAudio()">Upload</button>
-        <p id="status" style="color:blue;"></p>
         <h3>Transcription:</h3>
-        <pre id="transcription"></pre>
+        <p id="transcription"></p>
 
         <script>
             async function uploadAudio() {
-                const input = document.getElementById("fileInput");
-                const status = document.getElementById("status");
-                const output = document.getElementById("transcription");
-
-                if (!input.files.length) {
-                    alert("Please select a file!");
+                const fileInput = document.getElementById("fileInput");
+                if (!fileInput.files.length) {
+                    alert("Please select an audio file!");
                     return;
                 }
 
-                status.innerText = "Transcribing, please wait...";
-                output.innerText = "";
-
                 const formData = new FormData();
-                formData.append("file", input.files[0]);
+                formData.append("file", fileInput.files[0]);
+
+                document.getElementById("transcription").innerText = "Transcribing...";
 
                 try {
-                    const res = await fetch("/transcribe", {
+                    const response = await fetch("/transcribe/", {
                         method: "POST",
                         body: formData
                     });
 
-                    let data;
-                    try {
-                        data = await res.json();
-                    } catch (e) {
-                        status.innerText = "Server error! Could not parse response.";
-                        output.innerText = "Invalid JSON response.";
-                        return;
-                    }
+                    const result = await response.json();
 
-                    if (data.transcription) {
-                        status.innerText = "Done!";
-                        output.innerText = data.transcription;
+                    if (result.transcription) {
+                        document.getElementById("transcription").innerText = result.transcription;
+                    } else if (result.error) {
+                        document.getElementById("transcription").innerText = "Error: " + result.error;
                     } else {
-                        status.innerText = "Failed to transcribe.";
-                        output.innerText = data.error || "No transcription returned.";
+                        document.getElementById("transcription").innerText = "Unknown response format.";
                     }
-                } catch (err) {
-                    status.innerText = "Network error!";
-                    output.innerText = err;
+                } catch (error) {
+                    document.getElementById("transcription").innerText = "Failed to transcribe.";
                 }
             }
         </script>
@@ -93,37 +81,22 @@ def home():
     </html>
     """
 
-# Transcription route
-@app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
-    if model is None:
-        return JSONResponse(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "Model not loaded."}
-        )
-
-    temp_path = None
+# API to handle transcription
+@app.post("/transcribe/")
+async def transcribe_audio(file: UploadFile = File(...)):
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp:
-            temp.write(await file.read())
-            temp_path = temp.name
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
+            contents = await file.read()
+            temp_audio.write(contents)
+            temp_audio_path = temp_audio.name
 
-        print(f"Saved uploaded file to: {temp_path}")
-        result = model.transcribe(temp_path)
-        print("Transcription completed.")
+        model = get_model()
+        result = model.transcribe(temp_audio_path)
 
-        return {
-            "filename": file.filename,
-            "transcription": result.get("text", "")
-        }
+        os.remove(temp_audio_path)
+
+        return {"filename": file.filename, "transcription": result["text"]}
 
     except Exception as e:
-        print("Transcription error:", traceback.format_exc())
-        return JSONResponse(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": f"Transcription failed: {str(e)}"}
-        )
-
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+        return JSONResponse(status_code=500, content={"error": str(e)})
