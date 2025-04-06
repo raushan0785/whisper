@@ -1,34 +1,27 @@
 from fastapi import FastAPI, File, UploadFile, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import whisper
 import tempfile
 import os
 
 app = FastAPI()
 
-# Allow CORS (for local dev or frontend from other origin)
+# Enable CORS (in case frontend is separate)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change this in production
+    allow_origins=["*"],  # In production, restrict this
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Lazy load model
-model = None
+# Load Whisper model
+model = whisper.load_model("base")  # you can change to "tiny" if Render has memory issues
 
-def get_model():
-    global model
-    if model is None:
-        model = whisper.load_model("tiny")  # Use "base" if you want better accuracy
-    return model
-
-# Root HTML Page
+# Serve HTML UI
 @app.get("/", response_class=HTMLResponse)
-async def index():
+async def root():
     return """
     <!DOCTYPE html>
     <html lang="en">
@@ -39,7 +32,7 @@ async def index():
     </head>
     <body>
         <h2>Upload an Audio File</h2>
-        <input type="file" id="fileInput" accept="audio/*">
+        <input type="file" id="fileInput">
         <button onclick="uploadAudio()">Upload</button>
         <h3>Transcription:</h3>
         <p id="transcription"></p>
@@ -55,25 +48,16 @@ async def index():
                 const formData = new FormData();
                 formData.append("file", fileInput.files[0]);
 
-                document.getElementById("transcription").innerText = "Transcribing...";
-
                 try {
-                    const response = await fetch("https://whisper-9myq.onrender.com/transcribe/", {
+                    const response = await fetch("/transcribe/", {
                         method: "POST",
                         body: formData
                     });
 
                     const result = await response.json();
-
-                    if (result.transcription) {
-                        document.getElementById("transcription").innerText = result.transcription;
-                    } else if (result.error) {
-                        document.getElementById("transcription").innerText = "Error: " + result.error;
-                    } else {
-                        document.getElementById("transcription").innerText = "Unknown response format.";
-                    }
+                    document.getElementById("transcription").innerText = result.transcription;
                 } catch (error) {
-                    document.getElementById("transcription").innerText = "Failed to transcribe.";
+                    document.getElementById("transcription").innerText = "Error transcribing file!";
                 }
             }
         </script>
@@ -81,22 +65,23 @@ async def index():
     </html>
     """
 
-# API to handle transcription
+# Endpoint for transcription
 @app.post("/transcribe/")
 async def transcribe_audio(file: UploadFile = File(...)):
-    try:
-        suffix = os.path.splitext(file.filename)[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
-            contents = await file.read()
-            temp_audio.write(contents)
-            temp_audio_path = temp_audio.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+        temp_audio.write(await file.read())
+        temp_audio_path = temp_audio.name
 
-        model = get_model()
-        result = model.transcribe(temp_audio_path)
+    # Transcribe using Whisper
+    result = model.transcribe(temp_audio_path)
+    
+    # Clean up
+    os.remove(temp_audio_path)
 
-        os.remove(temp_audio_path)
+    return {"filename": file.filename, "transcription": result["text"]}
 
-        return {"filename": file.filename, "transcription": result["text"]}
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+# Run app with dynamic port detection (for Render)
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))  # Render sets PORT env variable
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
