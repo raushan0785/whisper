@@ -7,7 +7,7 @@
 </head>
 <body>
     <h2>Upload an Audio File</h2>
-    <input type="file" id="fileInput">
+    <input type="file" id="fileInput" accept="audio/*">
     <button onclick="uploadAudio()">Upload</button>
     <h3>Transcription:</h3>
     <p id="transcription"></p>
@@ -19,20 +19,21 @@
                 alert("Please select an audio file!");
                 return;
             }
-
             const formData = new FormData();
             formData.append("file", fileInput.files[0]);
-
             try {
-                const response = await fetch("http://127.0.0.1:8000/transcribe/", {
+                const response = await fetch("/transcribe/", {
                     method: "POST",
                     body: formData
                 });
-
+                if (!response.ok) {
+                    throw new Error("Network response was not ok");
+                }
                 const result = await response.json();
-                document.getElementById("transcription").innerText = result.transcription;
+                document.getElementById("transcription").innerText = result.transcription || "No transcription found.";
             } catch (error) {
                 document.getElementById("transcription").innerText = "Error transcribing file!";
+                console.error("Error:", error);
             }
         }
     </script>
