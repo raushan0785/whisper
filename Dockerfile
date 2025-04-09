@@ -1,19 +1,25 @@
-# Use a lightweight Python base image
 FROM python:3.10-slim
 
-# Set working directory inside the container
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /code
 
-# Copy requirements and install dependencies
+
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your app files into the container
 COPY app.py .
 COPY index.html .
 
-# Expose the port your app runs on
 EXPOSE 7860
 
-# Start the FastAPI app using uvicorn
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
